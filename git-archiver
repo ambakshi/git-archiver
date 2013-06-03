@@ -1,0 +1,146 @@
+#!/bin/bash
+# vim: set filetype=sh:
+#
+# git-archiver: recursively archive a git repo
+#               containing submodules.
+#
+# Amit Bakshi
+# ambakshi@gmail.com
+# 4/30/2013
+
+OPTS_SPEC="\
+git-archiver [options]
+
+--
+h,help        show the help
+q,quiet       quiet
+git-dir=      git repo to archive (default: \$PWD)
+git-base=     where to cache git repos (default: \$HOME/.git-archiver/repos)
+skip-fix      don't fix up the tar file (must extract with tar -i)
+"
+
+NONGIT_OK=1
+. $(git --exec-path)/git-sh-setup
+
+set -o pipefail
+
+say () {
+    if [ -z "$quiet" ]; then
+        echo >&2 "$@"
+    fi
+}
+
+parse_args () {
+    if [ $# -eq 0 ]; then
+        set -- -h
+    fi
+
+    git_base="$HOME/.git-archiver/repos" git_dir="$PWD" quiet=
+    skip_fix=
+
+    eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
+    while [ $# -gt 0 ]; do
+        opt="$1"
+        shift
+        case "$opt" in
+            -q) quiet=1 ;;
+            --git-dir) git_dir="$1"; shift ;;
+            --git-base) git_base="$1"; shift ;;
+            --skip-fix) skip_fix=1;;
+            --) break ;;
+            *) die "Unexpected option: $opt" ;;
+        esac
+    done
+    tmp_dir="/tmp/$LOGNAME/$(basename $0)/$$"
+    mkdir -p $tmp_dir/root || die "Failed to create $tmp_dir ..."
+    trap "rm -rf $tmp_dir" EXIT
+
+    sha1="$1" prefix=
+    if [ -z "$sha1" ]; then
+        die "Need to specify revision"
+    fi
+    if echo "$sha1" | grep -q ":"; then
+        prefix="$(echo $sha1 | cut -d: -f2)"
+        sha1="$(echo $sha1 | cut -d: -f1)"
+    fi
+}
+
+main () {
+    parse_args "$@" >&2 || die "Failed to parse args"
+
+    # mktar produces a tar file per repo. when these are
+    # interpreted as one large tar file, we need to ignore
+    # zeros in the tar file (tar -i). as a convenience we
+    # untar it first then generate a valid tar file. if
+    # you're willing to do the tar -i yourself, you can
+    # remove the pipe and subsequent tar c
+    if [ -n "$skip_fix" ]; then
+        mktar "$git_dir" "$sha1" "$prefix"
+    else
+        mktar "$git_dir" "$sha1" "$prefix" | tar xi -C $tmp_dir/root &&
+        (cd $tmp_dir/root && tar c .)
+    fi
+}
+
+git_remote_url () {
+    local _remote="${1:-origin}"
+    local _type="${2:-Fetch}"
+    git remote -v show -n $_remote | awk "/$_type URL/{ print \$3; }"
+}
+
+git_url2dir () {
+    echo $git_base/$(echo "$1" | sed -e 's#/#%#g')
+}
+
+git_dir2url () {
+    basename "$1" | sed -e 's#%#/#g'
+}
+
+mktar () {
+    if [ -t 1 ]; then
+        die "Refusing to dump tar to a tty."
+    fi
+    local git_dir="$1" sha1="$2" prefix="$3"
+    local i= base=
+    ( cd "${git_dir}" || die "Couldn't cd to $git_dir"
+    if git show $sha1:.gitmodules 2>/dev/null > $tmp_dir/gitmodules-${sha1}; then
+        git config -f $tmp_dir/gitmodules-${sha1} --get-regexp "submodule\..*\.path" | \
+                                awk '{print $2}' > $tmp_dir/gitmodules-${sha1}.names &&
+        for i in `cat $tmp_dir/gitmodules-${sha1}.names`; do
+            local pkg_url="`git config -f $tmp_dir/gitmodules-${sha1} --get submodule.$i.url`" &&
+            local pkg_dir="`git_url2dir $pkg_url`" &&
+            local pkg_rev="`git ls-tree $sha1 -- $i | awk '{print $3}'`" ||
+                die "Couldn't parse .gitmodules for $git_dir at $sha1"
+            if [ -z "$pkg_rev" ]; then
+                say "WARNING: .gitmodules contains reference to $pkg_url => $i,"
+                say " but no commit object found in tree. Make sure your .gitmodules doesn't contain old/stale data."
+                say " Ignoring $i gitmodule path."
+                continue
+            fi
+            if [ -z "$pkg_url" ]; then
+                say "WARNING: .gitmodules contains reference to path $i, but no url specified."
+                say " Ignoring $i gitmodule path."
+                continue
+            fi
+            (
+            if [ ! -e "$pkg_dir/objects" ]; then
+                say "cloning $pkg_url ..."
+                (mkdir -p "$pkg_dir" && \
+                    git clone --mirror "$pkg_url" "$pkg_dir") >&2 || die "Failed to clone $pkg_url to $pkg_dir"
+            fi
+            cd "$pkg_dir" || die "Failed to chdir to $pkg_dir"
+            if ! git cat-file -e $pkg_rev 2>/dev/null; then
+                say "fetching $pkg_url $pkg_rev ..." &&
+                git fetch >&2
+            fi
+            mktar "$pkg_dir" "$pkg_rev" "${prefix}${i#$base}/"
+            ) || \
+            die "Failed to archive $pkg_url rev $pkg_rev"
+        done
+    fi
+    say "adding repository $(git_dir2url `pwd`) $sha1:$prefix"
+    git archive --prefix="${prefix}" --format=tar $sha1:$base ||
+        die "git-archive in $git_dir for $sha1 failed." )
+}
+
+main "$@"
