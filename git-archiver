@@ -42,6 +42,7 @@ git-dir=      git repo to archive (default: \$PWD)
 git-base=     where to cache git repos (default: \$HOME/.git-archiver/repos)
 skip-fix      don't fix up the tar file (must extract with tar -i)
 prefix=       prefix to use
+format=       format to use for archive (default: tar)
 "
 
 NONGIT_OK=1
@@ -61,7 +62,7 @@ parse_args () {
     fi
 
     git_base="$HOME/.git-archiver/repos" git_dir="$PWD" quiet=
-    skip_fix=
+    skip_fix= prefix= format=tar
 
     eval "$(echo "$OPTS_SPEC" | git rev-parse --parseopt -- "$@" || echo exit $?)"
     while [ $# -gt 0 ]; do
@@ -73,6 +74,7 @@ parse_args () {
             --git-base) git_base="$1"; shift ;;
             --skip-fix) skip_fix=1;;
             --prefix) prefix="$1"; shift ;;
+            --format) format="$1"; shift ;;
             --) break ;;
             *) die "Unexpected option: $opt" ;;
         esac
@@ -103,8 +105,13 @@ main () {
     if [ -n "$skip_fix" ]; then
         mktar "$git_dir" "$sha1" "$prefix"
     else
-        mktar "$git_dir" "$sha1" "$prefix" | tar xi -C $tmp_dir/root &&
-        (cd $tmp_dir/root && tar c .)
+        mktar "$git_dir" "$sha1" "$prefix" | tar xi -C $tmp_dir/root || die "Failed to create archive"
+        case "$format" in
+            tar) (cd $tmp_dir/root && tar c .) ;;
+            tar.gz|tgz) (cd $tmp_dir/root && tar cz .) ;;
+            zip) (cd $tmp_dir/root && zip -r -0 -y - .) ;;
+            *) die "Unknown format: $format" ;;
+        esac
     fi
 }
 
