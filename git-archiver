@@ -41,6 +41,7 @@ q,quiet       quiet
 git-dir=      git repo to archive (default: \$PWD)
 git-base=     where to cache git repos (default: \$HOME/.git-archiver/repos)
 skip-fix      don't fix up the tar file (must extract with tar -i)
+prefix=       prefix to use
 "
 
 NONGIT_OK=1
@@ -71,6 +72,7 @@ parse_args () {
             --git-dir) git_dir="$1"; shift ;;
             --git-base) git_base="$1"; shift ;;
             --skip-fix) skip_fix=1;;
+            --prefix) prefix="$1"; shift ;;
             --) break ;;
             *) die "Unexpected option: $opt" ;;
         esac
@@ -79,7 +81,7 @@ parse_args () {
     mkdir -p $tmp_dir/root || die "Failed to create $tmp_dir ..."
     trap "rm -rf $tmp_dir" EXIT
 
-    sha1="$1" prefix=
+    sha1="$1"
     if [ -z "$sha1" ]; then
         die "Need to specify revision"
     fi
