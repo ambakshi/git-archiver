@@ -144,6 +144,9 @@ mktar () {
             local pkg_dir="`git_url2dir $pkg_url`" &&
             local pkg_rev="`git ls-tree $sha1 -- $i | awk '{print $3}'`" ||
                 die "Couldn't parse .gitmodules for $git_dir at $sha1"
+            if [ -e "${git_dir}/${i}/.git" ]; then
+                pkg_dir="${git_dir}/${i}"
+            fi
             if [ -z "$pkg_rev" ]; then
                 say "WARNING: .gitmodules contains reference to $pkg_url => $i,"
                 say " but no commit object found in tree. Make sure your .gitmodules doesn't contain old/stale data."
@@ -156,7 +159,7 @@ mktar () {
                 continue
             fi
             (
-            if [ ! -e "$pkg_dir/objects" ]; then
+            if [ ! -e "$pkg_dir" ]; then
                 say "cloning $pkg_url ..."
                 (mkdir -p "$pkg_dir" && \
                     git clone --mirror "$pkg_url" "$pkg_dir") >&2 || die "Failed to clone $pkg_url to $pkg_dir"
