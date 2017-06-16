@@ -109,7 +109,7 @@ main () {
         case "$format" in
             tar) (cd $tmp_dir/root && tar c .) ;;
             tar.gz|tgz) (cd $tmp_dir/root && tar cz .) ;;
-            zip) (cd $tmp_dir/root && zip -r -0 -y - .) ;;
+            zip) (cd $tmp_dir/root && zip -q -r -0 -y - .) ;;
             *) die "Unknown format: $format" ;;
         esac
     fi
